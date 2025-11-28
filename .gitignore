@@ -3,4 +3,5 @@ ignore.*
 
 # Folders
 out/
+dist/
 ignore.*/
