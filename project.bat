@@ -33,10 +33,10 @@ exit /b 0
 mkdir "%temp_dir%." "%output_dir%." > nul 2>&1
 set "compile_start=%time%"
 set unity=%temp_dir%unity
-set cflags=/nologo /std:c11 /Wall /Z7
+set cflags=/nologo /std:c11 /Wall /wd4820 /wd5045 /wd4711 /Z7 /O2
 set lflags=/debug /subsystem:windows /INCREMENTAL:NO /entry:_start
 set oflags=/Fo:"%unity%.obj" /Fe:"%output_dir%%project_name%.exe"
-set links=kernel32.lib
+set links=kernel32.lib winusb.lib hid.lib setupapi.lib ucrt.lib vcruntime.lib
 set command=cl %cflags% "%unity%.c" %links% %oflags% /link %lflags%
 echo // %command%> "%unity%.c"
 for /r "%root_dir%src" %%a in (*.c) do echo #include "%%a">> "%unity%.c"
@@ -70,6 +70,7 @@ exit /b 0
 
 :Dist
 mkdir "%dist_dir%." 2> nul
+copy /Y "C:\Windows\System32\vcruntime140.dll" "%output_dir%." 1> nul
 tar -acf "%dist_dir%%project_name%.zip" -C "%output_dir%." * || exit /b 1
 for %%g in (%dist_dir%%project_name%.zip) do ^
 for /f "tokens=1,2" %%s in ('robocopy %%~dpg. %%~dpg. %%~nxg /l /nocopy /is /njh /njs /ndl /nc') do (
