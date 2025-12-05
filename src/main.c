@@ -55,8 +55,6 @@ void _start(void) {
         );
     }
 
-    // TODO: restore features
-
     CloseHandle(device);
     ExitProcess(0);
 }

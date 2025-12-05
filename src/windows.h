@@ -10,6 +10,8 @@ typedef void *PVOID, *LPVOID;
 typedef void *HANDLE;
 typedef HANDLE HDEVINFO;
 typedef char CHAR;
+typedef long LONG;
+typedef LONG NTSTATUS;
 typedef __int64 LONG_PTR;
 typedef unsigned long ULONG, *PULONG;
 typedef unsigned __int64 ULONG_PTR;
@@ -24,6 +26,7 @@ typedef char *PSTR;
 typedef char* va_list;
 typedef unsigned __int64 size_t;
 typedef PVOID _locale_t;
+typedef USHORT USAGE, *PUSAGE;
 typedef PVOID WINUSB_INTERFACE_HANDLE, *PWINUSB_INTERFACE_HANDLE;
 typedef struct _GUID {
     ULONG   Data1;
@@ -65,24 +68,45 @@ typedef struct _HIDD_ATTRIBUTES {
   USHORT ProductID;
   USHORT VersionNumber;
 } HIDD_ATTRIBUTES, *PHIDD_ATTRIBUTES;
+typedef struct _HIDP_PREPARSED_DATA *PHIDP_PREPARSED_DATA;
+typedef struct _HIDP_CAPS {
+  USAGE  Usage;
+  USAGE  UsagePage;
+  USHORT InputReportByteLength;
+  USHORT OutputReportByteLength;
+  USHORT FeatureReportByteLength;
+  USHORT Reserved[17];
+  USHORT NumberLinkCollectionNodes;
+  USHORT NumberInputButtonCaps;
+  USHORT NumberInputValueCaps;
+  USHORT NumberInputDataIndices;
+  USHORT NumberOutputButtonCaps;
+  USHORT NumberOutputValueCaps;
+  USHORT NumberOutputDataIndices;
+  USHORT NumberFeatureButtonCaps;
+  USHORT NumberFeatureValueCaps;
+  USHORT NumberFeatureDataIndices;
+} HIDP_CAPS, *PHIDP_CAPS;
 
-#define WINAPI                  __stdcall
-#define ATTACH_PARENT_PROCESS   ((DWORD)-1)
-#define STD_OUTPUT_HANDLE       ((DWORD)-11)
-#define INVALID_HANDLE_VALUE    ((HANDLE)(LONG_PTR)-1)
-#define DIGCF_PRESENT           0x00000002
-#define DIGCF_DEVICEINTERFACE   0x00000010
-#define GENERIC_READ            0x80000000L
-#define GENERIC_WRITE           0x40000000L
-#define FILE_SHARE_READ         0x00000001
-#define FILE_SHARE_WRITE        0x00000002
-#define OPEN_EXISTING           3
-#define FILE_FLAG_OVERLAPPED    0x40000000
-#define ERROR_NO_MORE_ITEMS     259
-#define ERROR_IO_PENDING        997
-#define WAIT_ABANDONED          0x00000080L
-#define WAIT_OBJECT_0           0x00000000L
-#define WAIT_TIMEOUT            0x00000102L
+#define WINAPI                             __stdcall
+#define ATTACH_PARENT_PROCESS              ((DWORD)-1)
+#define STD_OUTPUT_HANDLE                  ((DWORD)-11)
+#define INVALID_HANDLE_VALUE               ((HANDLE)(LONG_PTR)-1)
+#define DIGCF_PRESENT                      0x00000002
+#define DIGCF_DEVICEINTERFACE              0x00000010
+#define GENERIC_READ                       0x80000000L
+#define GENERIC_WRITE                      0x40000000L
+#define FILE_SHARE_READ                    0x00000001
+#define FILE_SHARE_WRITE                   0x00000002
+#define OPEN_EXISTING                      3
+#define FILE_FLAG_OVERLAPPED               0x40000000
+#define ERROR_NO_MORE_ITEMS                259
+#define ERROR_IO_PENDING                   997
+#define WAIT_ABANDONED                     0x00000080L
+#define WAIT_OBJECT_0                      0x00000000L
+#define WAIT_TIMEOUT                       0x00000102L
+#define HIDP_STATUS_SUCCESS                ((NTSTATUS)(0x11 << 16))
+#define HIDP_STATUS_INVALID_PREPARSED_DATA ((NTSTATUS)(((0xC) << 28) | (0x11 << 16) | 1))
 #define GUID_DEVINTERFACE_HID                 (GUID){ 0x4D1E55B2, 0xF16F, 0x11CF, { 0x88, 0xCB, 0x00, 0x11, 0x11, 0x00, 0x00, 0x30 } }
 
 #define va_start(_list, _arg) ((void)__va_start(&(_list), (_arg)))
@@ -153,6 +177,22 @@ int __cdecl __stdio_common_vsnprintf_s(
 BOOLEAN HidD_GetAttributes(
     HANDLE           HidDeviceObject,
     PHIDD_ATTRIBUTES Attributes
+);
+BOOLEAN HidD_GetPreparsedData(
+    HANDLE               HidDeviceObject,
+    PHIDP_PREPARSED_DATA *PreparsedData
+);
+BOOLEAN HidD_FreePreparsedData(
+    PHIDP_PREPARSED_DATA PreparsedData
+);
+NTSTATUS HidP_GetCaps(
+    PHIDP_PREPARSED_DATA PreparsedData,
+    PHIDP_CAPS           Capabilities
+);
+BOOLEAN HidD_GetFeature(
+    HANDLE HidDeviceObject,
+    PVOID  ReportBuffer,
+    ULONG  ReportBufferLength
 );
 BOOLEAN HidD_SetFeature(
   HANDLE HidDeviceObject,
