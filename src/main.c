@@ -1,4 +1,5 @@
 #include "stdinc.h"
+#include "resources.h"
 
 /* macros */
 #define WNDCLASSNAME "ttd-wndclass"
@@ -69,7 +70,7 @@ void _start(void) {
         .uID = 1,
         .uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP,
         .uCallbackMessage = WM_SHOW_TRAY_MENU,
-        .hIcon = LoadIconA(NULL, (LPCSTR)IDI_APPLICATION),
+        .hIcon = LoadIconA(hinstance, MAKEINTRESOURCEA(IDI_APPICON)),
         .szTip = { 'T','i','n','y',' ','T','a','b','l','e','t',' ','D','r','i','v','e','r','\0' },
     };
     ASSERT(Shell_NotifyIconA(NIM_ADD, &s_tray_icon_data));

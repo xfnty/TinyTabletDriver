@@ -32,13 +32,14 @@ exit /b 0
 :Build
 mkdir "%temp_dir%." "%output_dir%." > nul 2>&1
 set "compile_start=%time%"
+rc /nologo /i "%root_dir%src" /fo "%temp_dir%icon.res" "%root_dir%res\icon.rc" || exit /b 1
 set unity=%temp_dir%unity
 set cflags=/nologo /std:c11 /Wall /wd4820 /wd5045 /wd4711 /wd4668 /Z7 /O2 /I "%root_dir%src"
 set lflags=/debug /subsystem:windows /INCREMENTAL:NO /entry:_start
 set oflags=/Fo:"%unity%.obj" /Fe:"%output_dir%%project_name%.exe"
 set links=kernel32.lib user32.lib hid.lib setupapi.lib dbghelp.lib shlwapi.lib cfgmgr32.lib ^
 shell32.lib ucrt.lib vcruntime.lib
-set command=cl %cflags% "%unity%.c" %links% %oflags% /link %lflags%
+set command=cl %cflags% "%unity%.c" "%temp_dir%icon.res" %links% %oflags% /link %lflags%
 echo // %command%> "%unity%.c"
 for /r "%root_dir%src" %%a in (*.c) do (
     echo %%a | findstr /c:".ignore" > nul

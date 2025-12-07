@@ -47,7 +47,7 @@ typedef unsigned short USHORT;
 typedef unsigned short WCHAR;
 typedef unsigned short WORD, ATOM;
 typedef unsigned int UINT;
-typedef const char *PCSTR, *LPCSTR;
+typedef const char *PCSTR, *LPSTR, *LPCSTR;
 typedef const WCHAR *PCWSTR, *LPCWSTR;
 typedef char *PSTR;
 typedef char* va_list;
@@ -507,6 +507,7 @@ typedef struct tagRECT {
 #define GUID_DEVINTERFACE_HID              (GUID){ 0x4D1E55B2, 0xF16F, 0x11CF, { 0x88, 0xCB, 0x00, 0x11, 0x11, 0x00, 0x00, 0x30 } }
 #define LOWORD(l)                          ((WORD)(((DWORD_PTR)(l)) & 0xffff))
 #define HIWORD(l)                          ((WORD)((((DWORD_PTR)(l)) >> 16) & 0xffff))
+#define MAKEINTRESOURCEA(i)                ((LPSTR)((ULONG_PTR)((WORD)(i))))
 
 #define va_start(_list, _arg) ((void)__va_start(&(_list), (_arg)))
 #define va_end(_list) ((void)((_list) = (va_list)0))
