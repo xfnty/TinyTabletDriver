@@ -2,7 +2,7 @@
 #include "resources.h"
 
 /* macros */
-#define WNDCLASSNAME "ttd-wndclass"
+#define WNDCLASSNAME "TinyTabletDriver"
 #define WM_SHOW_TRAY_MENU (WM_USER+1)
 #define TRAY_MENU_EXIT_ITEM 0
 #define TABLET_VID 1386
@@ -10,32 +10,40 @@
 #define COUNTOF(_a) (sizeof(_a)/sizeof((_a)[0]))
 #define ASSERT(_e) do { if (!(_e)) __debugbreak(); } while (0)
 
+/* typedefs */
+typedef struct {
+    HANDLE device;
+    HANDLE device_connected_event;
+    HCMNOTIFICATION device_changed_notification;
+    OVERLAPPED overlapped;
+} InputThreadContext;
+
 /* function declarations */
 static DWORD FormatTextVA(char *buffer, size_t max_size, const char *format, va_list args);
 static DWORD FormatTextA(char *buffer, size_t max_size, const char *format, ...);
 static void Println(const char *message, ...);
 static LONG WINAPI GlobalExceptionHandler(EXCEPTION_POINTERS *ex);
 static DWORD WINAPI CrashReportThreadProc(LPVOID arg);
+static DWORD WINAPI InputThreadProc(LPVOID arg);
 static LRESULT TrayWindowEventHandler(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
 static DWORD WaitForSingleObjectDispatchWndMessages(HANDLE object, DWORD dwMilliseconds);
 static DWORD CALLBACK DeviceChangedCallback(
     HCMNOTIFICATION       notification,
-    PVOID                 arg,
+    InputThreadContext   *ctx,
     CM_NOTIFY_ACTION      action,
     PCM_NOTIFY_EVENT_DATA data,
     DWORD                 data_size
 );
 
 /* variables */
+static BOOL was_exit_requested;
 static HANDLE s_stdout;
 static CRITICAL_SECTION s_crash_lock;
 static HWND s_hidden_window;
 static HMENU s_tray_menu;
 static NOTIFYICONDATAA s_tray_icon_data;
-static HANDLE s_device_connected;
-static HANDLE s_device;
-static HCMNOTIFICATION s_device_changed_notification;
-static OVERLAPPED s_overlapped;
+static HANDLE s_input_thread;
+static DWORD s_input_thread_id;
 
 /* function implementations */
 void _start(void) {
@@ -67,7 +75,6 @@ void _start(void) {
     s_tray_icon_data = (NOTIFYICONDATAA){
         .cbSize = sizeof(s_tray_icon_data),
         .hWnd = s_hidden_window,
-        .uID = 1,
         .uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP,
         .uCallbackMessage = WM_SHOW_TRAY_MENU,
         .hIcon = LoadIconA(hinstance, MAKEINTRESOURCEA(IDI_APPICON)),
@@ -75,102 +82,22 @@ void _start(void) {
     };
     ASSERT(Shell_NotifyIconA(NIM_ADD, &s_tray_icon_data));
 
-    s_device_connected = CreateEventA(0, true, false, 0);
+    s_input_thread = CreateThread(0, 0, InputThreadProc, 0, 0, &s_input_thread_id);
 
-    HDEVINFO hid_device_set = SetupDiGetClassDevsA(
-        &GUID_DEVINTERFACE_HID, 0, 0, DIGCF_DEVICEINTERFACE | DIGCF_PRESENT
-    );
-    for (int i = 0; ; i++) {
-        SP_DEVICE_INTERFACE_DATA iface_data = { .cbSize = sizeof(SP_DEVICE_INTERFACE_DATA) };
-        if (!SetupDiEnumDeviceInterfaces(hid_device_set, 0, &GUID_DEVINTERFACE_HID, i, &iface_data))
+    do {
+        DWORD wait = MsgWaitForMultipleObjects(1, &s_input_thread, false, INFINITE, QS_ALLINPUT);
+        if (wait != WAIT_OBJECT_0 + 1) {
+            Println("Wait on input thread failed with code (%u, %u)", GetLastError(), wait);
             break;
-
-        char details_buffer[1024] = {0};
-        PSP_DEVICE_INTERFACE_DETAIL_DATA_A details = (void*)details_buffer;
-        details->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_A);
-        SetupDiGetDeviceInterfaceDetailA(
-            hid_device_set, &iface_data, details, COUNTOF(details_buffer) - 1, 0, 0
-        );
-
-        s_device = CreateFileA(
-            details->DevicePath, GENERIC_READ, 0, 0, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, 0
-        );
-        if (s_device != INVALID_HANDLE_VALUE) {
-            HIDD_ATTRIBUTES attrs = { .Size = sizeof(attrs) };
-            bool valid = 
-                HidD_GetAttributes(s_device, &attrs)
-                && attrs.VendorID == TABLET_VID
-                && attrs.ProductID == TABLET_PID
-                && HidD_SetFeature(s_device, (BYTE[]){ 0x02, 0x02 }, 2);
-            if (valid) {
-                Println("Connected Wacom CTL-672 tablet.");
-                SetEvent(s_device_connected);
-                break;
-            }
         }
 
-        CloseHandle(s_device);
-        s_device = INVALID_HANDLE_VALUE;
-    }
-
-    CM_NOTIFY_FILTER filter = {
-        .cbSize = sizeof(filter),
-        .u.DeviceInterface.ClassGuid = GUID_DEVINTERFACE_HID,
-        .FilterType = CM_NOTIFY_FILTER_TYPE_DEVICEINTERFACE,
-    };
-    DWORD register_result = CM_Register_Notification(
-        &filter, 0, DeviceChangedCallback, &s_device_changed_notification
-    );
-    ASSERT(register_result == ERROR_SUCCESS);
-
-    s_overlapped.hEvent = CreateEventA(0, false, false, 0);
-
-    while (true) {
-        while (true) {
-            DWORD wait = WaitForSingleObjectDispatchWndMessages(s_device_connected, INFINITE);
-            if (wait == WAIT_OBJECT_0)
-                break;
+        for (MSG m; PeekMessageA(&m, s_hidden_window, 0, 0, PM_REMOVE); ) {
+            TranslateMessage(&m);
+            DispatchMessageA(&m);
         }
+    } while (!was_exit_requested);
 
-        while (true) {
-            BYTE buffer[10] = {0};
-            BOOL read_ok = ReadFile(s_device, buffer, sizeof(buffer), 0, &s_overlapped);
-            DWORD read_error = GetLastError();
-            if (!read_ok && read_error != ERROR_IO_PENDING)
-                break;
-
-            DWORD wait = WaitForSingleObjectDispatchWndMessages(s_overlapped.hEvent, INFINITE);
-            if (wait != WAIT_OBJECT_0)
-                break;
-
-            DWORD bytes_read = 0;
-            GetOverlappedResult(s_device, &s_overlapped, &bytes_read, false);
-
-            if (buffer[0] != 0x02 || (buffer[1] == 0x00 || buffer[1] == 0x80))
-                continue;
-
-            // fixme
-            static bool was_down = false;
-            bool down = buffer[1] & 0x01;
-            INPUT input = {
-                .type = INPUT_MOUSE,
-                .mi = (MOUSEINPUT){
-                    .dx = (USHORT)((float)(*(USHORT*)(buffer + 2)) / 21600.0f * 65535),
-                    .dy = (USHORT)((float)(*(USHORT*)(buffer + 4)) / 13500.0f * 65535),
-                    .dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE
-                        | ((!was_down && down) ? (MOUSEEVENTF_LEFTDOWN) : (0))
-                        | ((was_down && !down) ? (MOUSEEVENTF_LEFTUP) : (0)),
-                },
-            };
-            SendInput(1, &input, sizeof(input));
-            was_down = down;
-        }
-
-        s_device = INVALID_HANDLE_VALUE;
-        Println("Tablet lost.");
-        ResetEvent(s_device_connected);
-    }
-
+    Shell_NotifyIconA(NIM_DELETE, &s_tray_icon_data);
     ExitProcess(0);
 }
 
@@ -298,6 +225,117 @@ DWORD WINAPI CrashReportThreadProc(LPVOID arg) {
     return 0;
 }
 
+DWORD WINAPI InputThreadProc(LPVOID arg) {
+    (void)arg;
+
+    MSG m;
+    PeekMessageA(&m, NULL, WM_USER, WM_USER, PM_NOREMOVE);
+
+    InputThreadContext ctx = {
+        .device = INVALID_HANDLE_VALUE,
+        .device_connected_event = CreateEventA(0, true, false, 0),
+        .overlapped = (OVERLAPPED){ .hEvent = CreateEventA(0, false, false, 0) },
+    };
+
+    HDEVINFO hid_device_set = SetupDiGetClassDevsA(
+        &GUID_DEVINTERFACE_HID, 0, 0, DIGCF_DEVICEINTERFACE | DIGCF_PRESENT
+    );
+    for (int i = 0; ; i++) {
+        SP_DEVICE_INTERFACE_DATA iface_data = { .cbSize = sizeof(SP_DEVICE_INTERFACE_DATA) };
+        if (!SetupDiEnumDeviceInterfaces(hid_device_set, 0, &GUID_DEVINTERFACE_HID, i, &iface_data))
+            break;
+
+        char details_buffer[1024] = {0};
+        PSP_DEVICE_INTERFACE_DETAIL_DATA_A details = (void*)details_buffer;
+        details->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_A);
+        SetupDiGetDeviceInterfaceDetailA(
+            hid_device_set, &iface_data, details, COUNTOF(details_buffer) - 1, 0, 0
+        );
+
+        ctx.device = CreateFileA(
+            details->DevicePath, GENERIC_READ, 0, 0, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, 0
+        );
+        if (ctx.device != INVALID_HANDLE_VALUE) {
+            HIDD_ATTRIBUTES attrs = { .Size = sizeof(attrs) };
+            bool valid = 
+                HidD_GetAttributes(ctx.device, &attrs)
+                && attrs.VendorID == TABLET_VID
+                && attrs.ProductID == TABLET_PID
+                && HidD_SetFeature(ctx.device, (BYTE[]){ 0x02, 0x02 }, 2);
+            if (valid) {
+                Println("Connected Wacom CTL-672 tablet.");
+                SetEvent(ctx.device_connected_event);
+                break;
+            }
+        }
+
+        CloseHandle(ctx.device);
+        ctx.device = INVALID_HANDLE_VALUE;
+    }
+
+    CM_NOTIFY_FILTER filter = {
+        .cbSize = sizeof(filter),
+        .u.DeviceInterface.ClassGuid = GUID_DEVINTERFACE_HID,
+        .FilterType = CM_NOTIFY_FILTER_TYPE_DEVICEINTERFACE,
+    };
+    DWORD register_result = CM_Register_Notification(
+        &filter, &ctx, DeviceChangedCallback, &ctx.device_changed_notification
+    );
+    ASSERT(register_result == ERROR_SUCCESS);
+
+    while (true) {
+        ASSERT(WaitForSingleObject(ctx.device_connected_event, INFINITE) == WAIT_OBJECT_0);
+
+        while (true) {
+            BYTE buffer[10] = {0};
+            BOOL read_ok = ReadFile(ctx.device, buffer, sizeof(buffer), 0, &ctx.overlapped);
+            DWORD read_error = GetLastError();
+            if (!read_ok && read_error != ERROR_IO_PENDING)
+                break;
+
+            DWORD bytes_read = 0;
+            GetOverlappedResult(ctx.device, &ctx.overlapped, &bytes_read, true);
+
+            if (buffer[0] != 0x02 || (buffer[1] == 0x00 || buffer[1] == 0x80))
+                continue;
+
+            // fixme fixme fixme
+            static bool was_down = false, was_b1_down = false;
+            bool down = buffer[1] & 0x01, b1_down = buffer[1] & 0x02;
+            INPUT input = {
+                .type = INPUT_MOUSE,
+                .mi = (MOUSEINPUT){
+                    .dx = (USHORT)((float)(*(USHORT*)(buffer + 2)) / 21600.0f * 65535),
+                    .dy = (USHORT)((float)(*(USHORT*)(buffer + 4)) / 13500.0f * 65535),
+                    .dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE
+                        | ((!was_down && down) ? (MOUSEEVENTF_LEFTDOWN) : (0))
+                        | ((was_down && !down) ? (MOUSEEVENTF_LEFTUP) : (0))
+                        | ((!was_b1_down && b1_down) ? (MOUSEEVENTF_RIGHTDOWN) : (0))
+                        | ((was_b1_down && !b1_down) ? (MOUSEEVENTF_RIGHTUP) : (0)),
+                },
+            };
+            SendInput(1, &input, sizeof(input));
+            was_down = down; was_b1_down = b1_down;
+        }
+
+        ctx.device = INVALID_HANDLE_VALUE;
+        Println("Tablet lost.");
+        ResetEvent(ctx.device_connected_event);
+    }
+
+    while (true) {
+        DWORD wait = MsgWaitForMultipleObjects(1, &ctx.overlapped.hEvent, false, INFINITE, QS_ALLINPUT);
+        if (wait == WAIT_OBJECT_0) {
+            // read packet
+        } else if (wait == WAIT_OBJECT_0 + 1) {
+            if (GetMessageA(&m, (HWND)-1, 0, 0) && m.message == WM_QUIT)
+                break;
+        }
+    }
+
+    return 0;
+}
+
 LRESULT TrayWindowEventHandler(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     if (hwnd != s_hidden_window)
         return DefWindowProcA(hwnd, msg, wp, lp);
@@ -313,8 +351,7 @@ LRESULT TrayWindowEventHandler(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     } else if (msg == WM_COMMAND) {
         switch (LOWORD(lp)) {
         case TRAY_MENU_EXIT_ITEM:
-            Shell_NotifyIconA(NIM_DELETE, &s_tray_icon_data);
-            ExitProcess(0);
+            was_exit_requested = true;
             break;
         }
     }
@@ -322,36 +359,19 @@ LRESULT TrayWindowEventHandler(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     return DefWindowProcA(hwnd, msg, wp, lp);
 }
 
-static DWORD WaitForSingleObjectDispatchWndMessages(HANDLE object, DWORD dwMilliseconds) {
-    DWORD wait = 0;
-
-    while (true) {
-        wait = MsgWaitForMultipleObjects(1, &object, false, dwMilliseconds, QS_ALLINPUT);
-        if (wait != WAIT_OBJECT_0 + 1)
-            break;
-
-        for (MSG m; PeekMessageA(&m, s_hidden_window, 0, 0, PM_REMOVE); ) {
-            TranslateMessage(&m);
-            DispatchMessageA(&m);
-        }
-    }
-
-    return wait;
-}
-
 DWORD CALLBACK DeviceChangedCallback(
     HCMNOTIFICATION       notification,
-    PVOID                 arg,
+    InputThreadContext   *ctx,
     CM_NOTIFY_ACTION      action,
     PCM_NOTIFY_EVENT_DATA data,
     DWORD                 data_size
 ) {
-    (void)notification; (void)arg; (void)data_size;
+    (void)notification; (void)data_size;
 
-    if (action != CM_NOTIFY_ACTION_DEVICEINTERFACEARRIVAL || s_device != INVALID_HANDLE_VALUE)
+    if (action != CM_NOTIFY_ACTION_DEVICEINTERFACEARRIVAL || ctx->device != INVALID_HANDLE_VALUE)
         return ERROR_SUCCESS;
 
-    s_device = CreateFileW(
+    ctx->device = CreateFileW(
         data->u.DeviceInterface.SymbolicLink,
         GENERIC_READ,
         0,
@@ -360,22 +380,22 @@ DWORD CALLBACK DeviceChangedCallback(
         FILE_FLAG_OVERLAPPED,
         0
     );
-    if (s_device == INVALID_HANDLE_VALUE)
+    if (ctx->device == INVALID_HANDLE_VALUE)
         return ERROR_SUCCESS;
 
     HIDD_ATTRIBUTES attrs = { .Size = sizeof(attrs) };
     bool valid = 
-        HidD_GetAttributes(s_device, &attrs)
+        HidD_GetAttributes(ctx->device, &attrs)
         && attrs.VendorID == TABLET_VID
         && attrs.ProductID == TABLET_PID
-        && HidD_SetFeature(s_device, (BYTE[]){ 0x02, 0x02 }, 2);
+        && HidD_SetFeature(ctx->device, (BYTE[]){ 0x02, 0x02 }, 2);
     if (!valid) {
-        CloseHandle(s_device);
-        s_device = INVALID_HANDLE_VALUE;
+        CloseHandle(ctx->device);
+        ctx->device = INVALID_HANDLE_VALUE;
         return ERROR_SUCCESS;
     }
 
     Println("Connected Wacom CTL-672 tablet.");
-    SetEvent(s_device_connected);
+    SetEvent(ctx->device_connected_event);
     return ERROR_SUCCESS;
 }

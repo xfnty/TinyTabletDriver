@@ -5,10 +5,11 @@ Status:
 - find, open and read raw data from HID device with VID=1386 & PID=891 (aka CTL-672)
 - switch tablet from "generic mouse" mode into raw mode (but not restore it)
 - parse tablet report
-- send mouse inputs
-- show tray icon with partly broken exit menu button
+- send mouse inputs (position, LMB, RMB)
+- show tray icon with exit menu button
 - detect when tablet is connected/disconnected
 - sleep on all inputs (no active waiting)
+- have qute icon
 
 Build requirements:
 - [Visual Studio Build Tools][vstools] (MSVC, Windows SDK)

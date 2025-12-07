@@ -471,6 +471,8 @@ typedef struct tagRECT {
 #define MOUSEEVENTF_MOVE                   0x0001
 #define MOUSEEVENTF_LEFTDOWN               0x0002
 #define MOUSEEVENTF_LEFTUP                 0x0004
+#define MOUSEEVENTF_RIGHTDOWN              0x0008
+#define MOUSEEVENTF_RIGHTUP                0x0010
 #define MOUSEEVENTF_ABSOLUTE               0x8000
 #define SM_CXSCREEN                        0
 #define SM_CYSCREEN                        1
@@ -620,21 +622,10 @@ HMODULE WINAPI GetModuleHandleA(LPCSTR lpModuleName);
 
 /* user32.lib */
 int GetSystemMetrics(int nIndex);
-UINT SendInput(
-    UINT    cInputs,
-    LPINPUT pInputs,
-    int     cbSize
-);
-BOOL PeekMessageA(
-    LPMSG lpMsg,
-    HWND  hWnd,
-    UINT  wMsgFilterMin,
-    UINT  wMsgFilterMax,
-    UINT  wRemoveMsg
-);
-#define PeekMessage(...) PeekMessageA(__VA_ARGS__)
+UINT SendInput(UINT cInputs, LPINPUT pInputs, int cbSize);
+BOOL PeekMessageA(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax, UINT wRemoveMsg);
+BOOL GetMessageA(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax);
 int MessageBoxA(HWND hWnd, LPCSTR lpText, LPCSTR lpCaption, UINT uType);
-#define MessageBox(...) MessageBoxA(__VA_ARGS__)
 DWORD MsgWaitForMultipleObjects(
     DWORD        nCount,
     const HANDLE *pHandles,
@@ -642,13 +633,7 @@ DWORD MsgWaitForMultipleObjects(
     DWORD        dwMilliseconds,
     DWORD        dwWakeMask
 );
-BOOL PostThreadMessageA(
-    DWORD  idThread,
-    UINT   Msg,
-    WPARAM wParam,
-    LPARAM lParam
-);
-#define PostThreadMessage(...) PostThreadMessageA(__VA_ARGS__)
+BOOL PostThreadMessageA(DWORD idThread, UINT Msg, WPARAM wParam, LPARAM lParam);
 ATOM RegisterClassExA(const WNDCLASSEXA *cls);
 HWND CreateWindowExA(
     DWORD     dwExStyle,
