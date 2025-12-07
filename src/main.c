@@ -1,6 +1,9 @@
 #include "stdinc.h"
 
 /* macros */
+#define WNDCLASSNAME "ttd-wndclass"
+#define WM_SHOW_TRAY_MENU (WM_USER+1)
+#define TRAY_MENU_EXIT_ITEM 0
 #define TABLET_VID 1386
 #define TABLET_PID 891
 #define COUNTOF(_a) (sizeof(_a)/sizeof((_a)[0]))
@@ -12,6 +15,8 @@ static DWORD FormatTextA(char *buffer, size_t max_size, const char *format, ...)
 static void Println(const char *message, ...);
 static LONG WINAPI GlobalExceptionHandler(EXCEPTION_POINTERS *ex);
 static DWORD WINAPI CrashReportThreadProc(LPVOID arg);
+static LRESULT TrayWindowEventHandler(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
+static DWORD WaitForSingleObjectDispatchWndMessages(HANDLE object, DWORD dwMilliseconds);
 static DWORD CALLBACK DeviceChangedCallback(
     HCMNOTIFICATION       notification,
     PVOID                 arg,
@@ -23,8 +28,11 @@ static DWORD CALLBACK DeviceChangedCallback(
 /* variables */
 static HANDLE s_stdout;
 static CRITICAL_SECTION s_crash_lock;
-static HANDLE s_device;
+static HWND s_hidden_window;
+static HMENU s_tray_menu;
+static NOTIFYICONDATAA s_tray_icon_data;
 static HANDLE s_device_connected;
+static HANDLE s_device;
 static HCMNOTIFICATION s_device_changed_notification;
 static OVERLAPPED s_overlapped;
 
@@ -40,6 +48,32 @@ void _start(void) {
         SetUnhandledExceptionFilter(GlobalExceptionHandler);
     }
 
+    HINSTANCE hinstance = GetModuleHandleA(0);
+    WNDCLASSEXA cls = {
+        .cbSize = sizeof(cls),
+        .hInstance = hinstance,
+        .lpszClassName = WNDCLASSNAME,
+        .lpfnWndProc = TrayWindowEventHandler,
+    };
+    ASSERT(RegisterClassExA(&cls));
+    s_hidden_window = CreateWindowExA(0, WNDCLASSNAME, 0, 0, 0, 0, 0, 0, 0, 0, hinstance, 0);
+    ASSERT(s_hidden_window);
+
+    s_tray_menu = CreatePopupMenu();
+    ASSERT(s_tray_menu);
+    ASSERT(AppendMenuA(s_tray_menu, MF_STRING, TRAY_MENU_EXIT_ITEM, "Exit"));
+
+    s_tray_icon_data = (NOTIFYICONDATAA){
+        .cbSize = sizeof(s_tray_icon_data),
+        .hWnd = s_hidden_window,
+        .uID = 1,
+        .uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP,
+        .uCallbackMessage = WM_SHOW_TRAY_MENU,
+        .hIcon = LoadIconA(NULL, (LPCSTR)IDI_APPLICATION),
+        .szTip = { 'T','i','n','y',' ','T','a','b','l','e','t',' ','D','r','i','v','e','r','\0' },
+    };
+    ASSERT(Shell_NotifyIconA(NIM_ADD, &s_tray_icon_data));
+
     s_device_connected = CreateEventA(0, true, false, 0);
 
     HDEVINFO hid_device_set = SetupDiGetClassDevsA(
@@ -54,7 +88,7 @@ void _start(void) {
         PSP_DEVICE_INTERFACE_DETAIL_DATA_A details = (void*)details_buffer;
         details->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_A);
         SetupDiGetDeviceInterfaceDetailA(
-            hid_device_set, &iface_data, details, countof(details_buffer) - 1, 0, 0
+            hid_device_set, &iface_data, details, COUNTOF(details_buffer) - 1, 0, 0
         );
 
         s_device = CreateFileA(
@@ -91,32 +125,49 @@ void _start(void) {
     s_overlapped.hEvent = CreateEventA(0, false, false, 0);
 
     while (true) {
-        DWORD wait = WaitForSingleObject(s_device_connected, INFINITE);
-        ASSERT(wait == WAIT_OBJECT_0);
+        while (true) {
+            DWORD wait = WaitForSingleObjectDispatchWndMessages(s_device_connected, INFINITE);
+            if (wait == WAIT_OBJECT_0)
+                break;
+        }
 
         while (true) {
             BYTE buffer[10] = {0};
             BOOL read_ok = ReadFile(s_device, buffer, sizeof(buffer), 0, &s_overlapped);
             DWORD read_error = GetLastError();
-            if (!read_ok && read_error != ERROR_IO_PENDING) {
-                s_device = INVALID_HANDLE_VALUE;
-                Println("Tablet lost.");
-                ResetEvent(s_device_connected);
+            if (!read_ok && read_error != ERROR_IO_PENDING)
                 break;
-            }
+
+            DWORD wait = WaitForSingleObjectDispatchWndMessages(s_overlapped.hEvent, INFINITE);
+            if (wait != WAIT_OBJECT_0)
+                break;
 
             DWORD bytes_read = 0;
-            GetOverlappedResult(s_device, &s_overlapped, &bytes_read, true);
+            GetOverlappedResult(s_device, &s_overlapped, &bytes_read, false);
 
             if (buffer[0] != 0x02 || (buffer[1] == 0x00 || buffer[1] == 0x80))
                 continue;
 
-            Println(
-                "%02hhX %02hhX %02hhX %02hhX %02hhX %02hhX %02hhX %02hhX %02hhX %02hhX ",
-                buffer[0], buffer[1], buffer[2], buffer[3], buffer[4], 
-                buffer[5], buffer[6], buffer[7], buffer[8], buffer[9]
-            );
+            // fixme
+            static bool was_down = false;
+            bool down = buffer[1] & 0x01;
+            INPUT input = {
+                .type = INPUT_MOUSE,
+                .mi = (MOUSEINPUT){
+                    .dx = (USHORT)((float)(*(USHORT*)(buffer + 2)) / 21600.0f * 65535),
+                    .dy = (USHORT)((float)(*(USHORT*)(buffer + 4)) / 13500.0f * 65535),
+                    .dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE
+                        | ((!was_down && down) ? (MOUSEEVENTF_LEFTDOWN) : (0))
+                        | ((was_down && !down) ? (MOUSEEVENTF_LEFTUP) : (0)),
+                },
+            };
+            SendInput(1, &input, sizeof(input));
+            was_down = down;
         }
+
+        s_device = INVALID_HANDLE_VALUE;
+        Println("Tablet lost.");
+        ResetEvent(s_device_connected);
     }
 
     ExitProcess(0);
@@ -244,6 +295,47 @@ DWORD WINAPI CrashReportThreadProc(LPVOID arg) {
     PeekMessageA(&m, NULL, WM_USER, WM_USER, PM_NOREMOVE); 
     MessageBoxA(0, (const char*)arg, "Tiny Tablet Driver has crashed.", MB_ICONERROR | MB_OK);
     return 0;
+}
+
+LRESULT TrayWindowEventHandler(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    if (hwnd != s_hidden_window)
+        return DefWindowProcA(hwnd, msg, wp, lp);
+
+    if (msg == WM_SHOW_TRAY_MENU) {
+        UINT tray_window_msg = LOWORD(lp);
+        if (tray_window_msg == WM_RBUTTONDOWN) {
+            POINT cursor;
+            GetCursorPos(&cursor);
+            SetForegroundWindow(s_hidden_window);
+            TrackPopupMenu(s_tray_menu, 0, cursor.x, cursor.y, 0, s_hidden_window, 0);
+        }
+    } else if (msg == WM_COMMAND) {
+        switch (LOWORD(lp)) {
+        case TRAY_MENU_EXIT_ITEM:
+            Shell_NotifyIconA(NIM_DELETE, &s_tray_icon_data);
+            ExitProcess(0);
+            break;
+        }
+    }
+
+    return DefWindowProcA(hwnd, msg, wp, lp);
+}
+
+static DWORD WaitForSingleObjectDispatchWndMessages(HANDLE object, DWORD dwMilliseconds) {
+    DWORD wait = 0;
+
+    while (true) {
+        wait = MsgWaitForMultipleObjects(1, &object, false, dwMilliseconds, QS_ALLINPUT);
+        if (wait != WAIT_OBJECT_0 + 1)
+            break;
+
+        for (MSG m; PeekMessageA(&m, s_hidden_window, 0, 0, PM_REMOVE); ) {
+            TranslateMessage(&m);
+            DispatchMessageA(&m);
+        }
+    }
+
+    return wait;
 }
 
 DWORD CALLBACK DeviceChangedCallback(

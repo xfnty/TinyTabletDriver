@@ -28,7 +28,7 @@ typedef unsigned long long uint64_t, uintptr_t;
 #define CALLBACK __stdcall
 
 typedef int BOOL;
-typedef void *HWND;
+typedef void *HWND, *HMENU, *HINSTANCE, *HICON, *HCURSOR, *HBRUSH, *HMODULE;
 typedef void VOID, *PVOID, *LPVOID;
 typedef void *HANDLE;
 typedef HANDLE HDEVINFO;
@@ -45,7 +45,7 @@ typedef unsigned long long DWORD64, *PDWORD64, ULONGLONG, ULONG64;
 typedef long long LONGLONG;
 typedef unsigned short USHORT;
 typedef unsigned short WCHAR;
-typedef unsigned short WORD;
+typedef unsigned short WORD, ATOM;
 typedef unsigned int UINT;
 typedef const char *PCSTR, *LPCSTR;
 typedef const WCHAR *PCWSTR, *LPCWSTR;
@@ -57,7 +57,7 @@ typedef USHORT USAGE, *PUSAGE;
 typedef UINT_PTR WPARAM;
 typedef LONG_PTR LPARAM;
 typedef LONG_PTR LRESULT;
-typedef ULONG_PTR SIZE_T;
+typedef ULONG_PTR SIZE_T, DWORD_PTR;
 typedef PVOID WINUSB_INTERFACE_HANDLE, *PWINUSB_INTERFACE_HANDLE;
 typedef struct _GUID {
     ULONG   Data1;
@@ -409,6 +409,43 @@ typedef DWORD (CALLBACK *PCM_NOTIFY_CALLBACK)(
     PCM_NOTIFY_EVENT_DATA EventData,
     DWORD                 EventDataSize
 );
+typedef struct _NOTIFYICONDATAA {
+    DWORD cbSize;
+    HWND hWnd;
+    UINT uID;
+    UINT uFlags;
+    UINT uCallbackMessage;
+    HICON hIcon;
+    CHAR   szTip[128];
+    DWORD dwState;
+    DWORD dwStateMask;
+    CHAR   szInfo[256];
+    CHAR   szInfoTitle[64];
+    DWORD dwInfoFlags;
+    GUID guidItem;
+    HICON hBalloonIcon;
+} NOTIFYICONDATAA, *PNOTIFYICONDATAA;
+typedef LRESULT (*WNDPROC)(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
+typedef struct tagWNDCLASSEXA {
+    UINT      cbSize;
+    UINT      style;
+    WNDPROC   lpfnWndProc;
+    int       cbClsExtra;
+    int       cbWndExtra;
+    HINSTANCE hInstance;
+    HICON     hIcon;
+    HCURSOR   hCursor;
+    HBRUSH    hbrBackground;
+    LPCSTR    lpszMenuName;
+    LPCSTR    lpszClassName;
+    HICON     hIconSm;
+} WNDCLASSEXA, *PWNDCLASSEXA;
+typedef struct tagRECT {
+    LONG left;
+    LONG top;
+    LONG right;
+    LONG bottom;
+} RECT;
 
 #define NULL                               0
 #define ERROR_SUCCESS                      0L
@@ -442,6 +479,8 @@ typedef DWORD (CALLBACK *PCM_NOTIFY_CALLBACK)(
 #define PM_REMOVE                          0x0001
 #define WM_USER                            0x0400
 #define WM_QUIT                            0x0012
+#define WM_RBUTTONDOWN                     0x0204
+#define WM_COMMAND                         0x0111
 #define MB_OK                              0x00000000L
 #define MB_ICONERROR                       0x00000010L
 #define TH32CS_SNAPTHREAD                  0x00000004
@@ -454,10 +493,20 @@ typedef DWORD (CALLBACK *PCM_NOTIFY_CALLBACK)(
 #define EXCEPTION_STACK_OVERFLOW           0xC00000FDL
 #define EXCEPTION_CONTINUE_SEARCH          0x0
 #define INFINITE                           0xFFFFFFFF
+#define NIF_MESSAGE                        0x00000001
+#define NIF_ICON                           0x00000002
+#define NIF_TIP                            0x00000004
+#define NIM_ADD                            0x00000000
+#define NIM_DELETE                         0x00000002
+#define IDI_APPLICATION                    32512
+#define MF_STRING                          0x00000000L
+#define MF_SEPARATOR                       0x00000800L
 #define QS_ALLINPUT                        (0x0002 | 0x0001 | 0x0400 | 0x0008 | 0x0010 | 0x0020 | 0x0040)
 #define HIDP_STATUS_SUCCESS                ((NTSTATUS)(0x11 << 16))
 #define HIDP_STATUS_INVALID_PREPARSED_DATA ((NTSTATUS)(((0xC) << 28) | (0x11 << 16) | 1))
 #define GUID_DEVINTERFACE_HID              (GUID){ 0x4D1E55B2, 0xF16F, 0x11CF, { 0x88, 0xCB, 0x00, 0x11, 0x11, 0x00, 0x00, 0x30 } }
+#define LOWORD(l)                          ((WORD)(((DWORD_PTR)(l)) & 0xffff))
+#define HIWORD(l)                          ((WORD)((((DWORD_PTR)(l)) >> 16) & 0xffff))
 
 #define va_start(_list, _arg) ((void)__va_start(&(_list), (_arg)))
 #define va_end(_list) ((void)((_list) = (va_list)0))
@@ -566,6 +615,7 @@ HANDLE CreateThread(
 HANDLE OpenThread(DWORD dwDesiredAccess, BOOL bInheritHandle, DWORD dwThreadId);
 DWORD SuspendThread(HANDLE hThread);
 VOID Sleep(DWORD dwMilliseconds);
+HMODULE WINAPI GetModuleHandleA(LPCSTR lpModuleName);
 
 /* user32.lib */
 int GetSystemMetrics(int nIndex);
@@ -598,6 +648,30 @@ BOOL PostThreadMessageA(
     LPARAM lParam
 );
 #define PostThreadMessage(...) PostThreadMessageA(__VA_ARGS__)
+ATOM RegisterClassExA(const WNDCLASSEXA *cls);
+HWND CreateWindowExA(
+    DWORD     dwExStyle,
+    LPCSTR    lpClassName,
+    LPCSTR    lpWindowName,
+    DWORD     dwStyle,
+    int       X,
+    int       Y,
+    int       nWidth,
+    int       nHeight,
+    HWND      hWndParent,
+    HMENU     hMenu,
+    HINSTANCE hInstance,
+    LPVOID    lpParam
+);
+LRESULT WINAPI DefWindowProcA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam);
+HICON WINAPI LoadIconA(HINSTANCE hInstance, LPCSTR lpIconName);
+BOOL WINAPI TranslateMessage(const MSG *lpMsg);
+LRESULT WINAPI DispatchMessageA(const MSG *lpMsg);
+HMENU CreatePopupMenu(void);
+BOOL AppendMenuA(HMENU hMenu, UINT uFlags, UINT_PTR uIDNewItem, LPCSTR lpNewItem);
+BOOL TrackPopupMenu(HMENU hMenu, UINT uFlags, int x, int y, int _, HWND hWnd, const RECT *prcRect);
+BOOL GetCursorPos(LPPOINT lpPoint);
+BOOL SetForegroundWindow(HWND hWnd);
 
 /* vcruntime.lib */
 int __cdecl __stdio_common_vsnprintf_s(
@@ -703,3 +777,6 @@ DWORD CM_Register_Notification(
     PHCMNOTIFICATION    pNotifyContext
 );
 DWORD CM_Unregister_Notification(HCMNOTIFICATION NotifyContext);
+
+/* shell32.lib */
+BOOL Shell_NotifyIconA(DWORD dwMessage, PNOTIFYICONDATAA lpData);
