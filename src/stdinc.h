@@ -504,6 +504,7 @@ typedef struct tagRECT {
 #define IDI_APPLICATION                    32512
 #define MF_STRING                          0x00000000L
 #define MF_SEPARATOR                       0x00000800L
+#define GWLP_USERDATA                      -21
 #define QS_ALLINPUT                        (0x0002 | 0x0001 | 0x0400 | 0x0008 | 0x0010 | 0x0020 | 0x0040)
 #define HIDP_STATUS_SUCCESS                ((NTSTATUS)(0x11 << 16))
 #define HIDP_STATUS_INVALID_PREPARSED_DATA ((NTSTATUS)(((0xC) << 28) | (0x11 << 16) | 1))
@@ -660,6 +661,8 @@ BOOL AppendMenuA(HMENU hMenu, UINT uFlags, UINT_PTR uIDNewItem, LPCSTR lpNewItem
 BOOL TrackPopupMenu(HMENU hMenu, UINT uFlags, int x, int y, int _, HWND hWnd, const RECT *prcRect);
 BOOL GetCursorPos(LPPOINT lpPoint);
 BOOL SetForegroundWindow(HWND hWnd);
+LONG_PTR SetWindowLongPtrA(HWND hWnd, int nIndex, LONG_PTR dwNewLong);
+LONG_PTR GetWindowLongPtrA(HWND hWnd, int nIndex);
 
 /* vcruntime.lib */
 int __cdecl __stdio_common_vsnprintf_s(
