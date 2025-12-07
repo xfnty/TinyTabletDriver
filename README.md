@@ -5,12 +5,10 @@ Status:
 - find, open and read raw data from HID device with VID=1386 & PID=891 (aka CTL-672)
 - switch tablet from "generic mouse" mode into raw mode (but not restore it)
 - parse tablet report
-- send mouse inputs with absolute position and left button state with no mapping or scaling
-- exit only when `ReadFile` fails (when unplugging the tablet)
 
 Build requirements:
 - [Visual Studio Build Tools][vstools] (MSVC, Windows SDK)
-- [64-Bit MSVC toolset][64tools] command prompt being active (preferrably)
+- [64-Bit MSVC toolset][64tools] command prompt being active
 
 Build and run:
 ```bat

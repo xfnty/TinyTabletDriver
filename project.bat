@@ -33,13 +33,16 @@ exit /b 0
 mkdir "%temp_dir%." "%output_dir%." > nul 2>&1
 set "compile_start=%time%"
 set unity=%temp_dir%unity
-set cflags=/nologo /std:c11 /Wall /wd4820 /wd5045 /wd4711 /Z7 /O2
+set cflags=/nologo /std:c11 /Wall /wd4820 /wd5045 /wd4711 /wd4668 /Z7 /O2 /I "%root_dir%src"
 set lflags=/debug /subsystem:windows /INCREMENTAL:NO /entry:_start
 set oflags=/Fo:"%unity%.obj" /Fe:"%output_dir%%project_name%.exe"
-set links=kernel32.lib user32.lib hid.lib setupapi.lib ucrt.lib vcruntime.lib
+set links=kernel32.lib user32.lib hid.lib setupapi.lib dbghelp.lib shlwapi.lib cfgmgr32.lib ucrt.lib vcruntime.lib
 set command=cl %cflags% "%unity%.c" %links% %oflags% /link %lflags%
 echo // %command%> "%unity%.c"
-for /r "%root_dir%src" %%a in (*.c) do echo #include "%%a">> "%unity%.c"
+for /r "%root_dir%src" %%a in (*.c) do (
+    echo %%a | findstr /c:".ignore" > nul
+    if !errorlevel! neq 0 echo #include "%%a">> "%unity%.c"
+)
 %command% || exit /b 1
 set "compile_end=%time%"
 for /f "tokens=1-4 delims=:.," %%a in ("%compile_start%") do set start_h=%%a&set /a start_m=100%%b %% 100&set /a start_s=100%%c %% 100&set /a start_ms=100%%d %% 100
