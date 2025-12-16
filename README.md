@@ -1,8 +1,6 @@
 **tabd** – minimal userspace driver for drawing tablets.
 
-<p align="center">
-  <img src="docs/screenshot.png" width="300" />
-</p>
+<img src="docs/screenshot.png" width="300" />
 
 ### Developing
 Compile using MSVC with 64-bit prompt enabled (32-bit evironment is **not** supported):
