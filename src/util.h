@@ -66,17 +66,18 @@ int vswprintf_s(wchar_t *buffer, size_t size, const wchar_t *format, va_list arg
 #define CALLBACK __stdcall
 
 typedef unsigned char UCHAR, BYTE, BOOLEAN;
-typedef int BOOL;
+typedef int BOOL, INT32;
 typedef long LONG;
 typedef unsigned long ULONG, *PULONG;
 typedef __int64 LONG_PTR, LPARAM, LRESULT;
-typedef unsigned int DWORD, *PDWORD, *LPDWORD, UINT;
+typedef unsigned int DWORD, *PDWORD, *LPDWORD, UINT, UINT32;
 typedef unsigned short USHORT, WCHAR, *PWSTR, WORD, ATOM;
 typedef void VOID, *PVOID, *LPVOID;
-typedef PVOID HANDLE, HWND, HMENU, HINSTANCE, HICON, HCURSOR, HBRUSH, HMODULE;
+typedef PVOID HANDLE, HWND, HMENU, HINSTANCE, HICON, HCURSOR, HBRUSH, HMODULE, 
+HSYNTHETICPOINTERDEVICE, HWINEVENTHOOK;
 typedef const PWSTR PCWSTR, LPCWSTR;
 typedef const char *PCSTR, *LPSTR, *LPCSTR;
-typedef unsigned __int64 ULONG_PTR, UINT_PTR, SIZE_T, DWORD_PTR, WPARAM;
+typedef unsigned __int64 ULONG_PTR, UINT_PTR, SIZE_T, DWORD_PTR, WPARAM, UINT64;
 typedef struct _OVERLAPPED {
   ULONG_PTR Internal;
   ULONG_PTR InternalHigh;
@@ -86,7 +87,7 @@ typedef struct _OVERLAPPED {
       DWORD OffsetHigh;
     } DUMMYSTRUCTNAME;
     PVOID Pointer;
-  } DUMMYUNIONNAME;
+  };
   HANDLE    hEvent;
 } OVERLAPPED, *LPOVERLAPPED;
 typedef struct _SECURITY_ATTRIBUTES {
@@ -198,6 +199,88 @@ typedef struct _HIDD_ATTRIBUTES {
   USHORT ProductID;
   USHORT VersionNumber;
 } HIDD_ATTRIBUTES, *PHIDD_ATTRIBUTES;
+enum {
+    PT_POINTER = 1,
+    PT_TOUCH   = 2,
+    PT_PEN     = 3,
+    PT_MOUSE   = 4,
+};
+typedef DWORD POINTER_INPUT_TYPE;
+typedef UINT32 POINTER_FLAGS;
+typedef enum {
+    POINTER_FEEDBACK_DEFAULT = 1,   // The injected pointer input feedback may get suppressed by the end-user settings in the Pen and Touch control panel.
+    POINTER_FEEDBACK_INDIRECT = 2,  // The injected pointer input feedback overrides the end-user settings in the Pen and Touch control panel.
+    POINTER_FEEDBACK_NONE = 3,      // No touch visualizations.
+} POINTER_FEEDBACK_MODE;
+typedef enum tagPOINTER_BUTTON_CHANGE_TYPE {
+    POINTER_CHANGE_NONE,
+    POINTER_CHANGE_FIRSTBUTTON_DOWN,
+    POINTER_CHANGE_FIRSTBUTTON_UP,
+    POINTER_CHANGE_SECONDBUTTON_DOWN,
+    POINTER_CHANGE_SECONDBUTTON_UP,
+    POINTER_CHANGE_THIRDBUTTON_DOWN,
+    POINTER_CHANGE_THIRDBUTTON_UP,
+    POINTER_CHANGE_FOURTHBUTTON_DOWN,
+    POINTER_CHANGE_FOURTHBUTTON_UP,
+    POINTER_CHANGE_FIFTHBUTTON_DOWN,
+    POINTER_CHANGE_FIFTHBUTTON_UP,
+} POINTER_BUTTON_CHANGE_TYPE;
+typedef struct tagPOINTER_INFO {
+    POINTER_INPUT_TYPE    pointerType;
+    UINT32          pointerId;
+    UINT32          frameId;
+    POINTER_FLAGS   pointerFlags;
+    HANDLE          sourceDevice;
+    HWND            hwndTarget;
+    POINT           ptPixelLocation;
+    POINT           ptHimetricLocation;
+    POINT           ptPixelLocationRaw;
+    POINT           ptHimetricLocationRaw;
+    DWORD           dwTime;
+    UINT32          historyCount;
+    INT32           InputData;
+    DWORD           dwKeyStates;
+    UINT64          PerformanceCount;
+    POINTER_BUTTON_CHANGE_TYPE ButtonChangeType;
+} POINTER_INFO;
+typedef UINT32 TOUCH_FLAGS;
+typedef UINT32 TOUCH_MASK;
+typedef struct tagPOINTER_TOUCH_INFO {
+    POINTER_INFO    pointerInfo;
+    TOUCH_FLAGS     touchFlags;
+    TOUCH_MASK      touchMask;
+    RECT            rcContact;
+    RECT            rcContactRaw;
+    UINT32          orientation;
+    UINT32          pressure;
+} POINTER_TOUCH_INFO;
+typedef UINT32 PEN_FLAGS;
+typedef UINT32 PEN_MASK;
+typedef struct tagPOINTER_PEN_INFO {
+    POINTER_INFO    pointerInfo;
+    PEN_FLAGS       penFlags;
+    PEN_MASK        penMask;
+    UINT32          pressure;
+    UINT32          rotation;
+    INT32           tiltX;
+    INT32           tiltY;
+} POINTER_PEN_INFO;
+typedef struct tagPOINTER_TYPE_INFO {
+    POINTER_INPUT_TYPE  type;
+    union{
+        POINTER_TOUCH_INFO touchInfo;
+        POINTER_PEN_INFO   penInfo;
+    };
+}POINTER_TYPE_INFO, *PPOINTER_TYPE_INFO;
+typedef VOID (CALLBACK* WINEVENTPROC)(
+    HWINEVENTHOOK hWinEventHook,
+    DWORD         event,
+    HWND          hwnd,
+    LONG          idObject,
+    LONG          idChild,
+    DWORD         idEventThread,
+    DWORD         dwmsEventTime
+);
 
 #define ERROR_SUCCESS                      0L
 #define ATTACH_PARENT_PROCESS              ((DWORD)-1)
@@ -234,6 +317,28 @@ typedef struct _HIDD_ATTRIBUTES {
 #define MOUSEEVENTF_ABSOLUTE               0x8000
 #define SM_CXSCREEN                        0
 #define SM_CYSCREEN                        1
+#define PEN_FLAG_NONE                      0x00000000
+#define PEN_FLAG_BARREL                    0x00000001
+#define PEN_FLAG_INVERTED                  0x00000002
+#define PEN_FLAG_ERASER                    0x00000004
+#define PEN_MASK_NONE                      0x00000000
+#define PEN_MASK_PRESSURE                  0x00000001
+#define PEN_MASK_ROTATION                  0x00000002
+#define PEN_MASK_TILT_X                    0x00000004
+#define PEN_MASK_TILT_Y                    0x00000008
+#define POINTER_FLAG_INRANGE               0x00000002
+#define POINTER_FLAG_INCONTACT             0x00000004
+#define POINTER_FLAG_FIRSTBUTTON           0x00000010
+#define POINTER_FLAG_SECONDBUTTON          0x00000020
+#define POINTER_FLAG_THIRDBUTTON           0x00000040
+#define POINTER_FLAG_FOURTHBUTTON          0x00000080
+#define POINTER_FLAG_FIFTHBUTTON           0x00000100
+#define POINTER_FLAG_PRIMARY               0x00002000
+#define POINTER_FLAG_DOWN                  0x00010000
+#define POINTER_FLAG_UP                    0x00040000
+#define EVENT_SYSTEM_FOREGROUND            0x0003
+#define WINEVENT_OUTOFCONTEXT              0x0000
+#define WINEVENT_SKIPOWNPROCESS            0x0002
 #define LOWORD(l)                          ((WORD)(((DWORD_PTR)(l)) & 0xffff))
 #define HIWORD(l)                          ((WORD)((((DWORD_PTR)(l)) >> 16) & 0xffff))
 #define MAKEINTRESOURCEW(i)                ((LPCWSTR)((ULONG_PTR)((WORD)(i))))
@@ -340,6 +445,25 @@ BOOL GetCursorPos(LPPOINT lpPoint);
 BOOL SetForegroundWindow(HWND hWnd);
 BOOLEAN HidD_GetAttributes(HANDLE HidDeviceObject, PHIDD_ATTRIBUTES Attributes);
 BOOLEAN HidD_SetFeature(HANDLE HidDeviceObject, PVOID ReportBuffer, ULONG ReportBufferLength);
+HWND GetForegroundWindow(void);
+HSYNTHETICPOINTERDEVICE WINAPI CreateSyntheticPointerDevice(
+    POINTER_INPUT_TYPE pointerType, ULONG maxCount, POINTER_FEEDBACK_MODE mode
+);
+BOOL WINAPI InjectSyntheticPointerInput(
+    HSYNTHETICPOINTERDEVICE device, const POINTER_TYPE_INFO* pointerInfo, UINT32 count
+);
+void WINAPI DestroySyntheticPointerDevice(HSYNTHETICPOINTERDEVICE device);
+HWINEVENTHOOK SetWinEventHook(
+    DWORD        eventMin,
+    DWORD        eventMax,
+    HMODULE      hmodWinEventProc,
+    WINEVENTPROC pfnWinEventProc,
+    DWORD        idProcess,
+    DWORD        idThread,
+    DWORD        dwFlags
+);
+BOOL UnhookWinEvent(HWINEVENTHOOK hWinEventHook);
+LRESULT CALLBACK DefWindowProcW(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam);
 
 
 /* shlwapi.h */
@@ -366,7 +490,7 @@ typedef struct _NOTIFYICONDATAW {
     union {
         UINT  uTimeout;
         UINT  uVersion;
-    } DUMMYUNIONNAME;
+    };
     WCHAR  szInfoTitle[64];
     DWORD dwInfoFlags;
     GUID guidItem;

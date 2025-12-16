@@ -8,6 +8,7 @@
 
 typedef struct {
     Vec2 point;
+    float pressure;
     DWORD flags;
 } TabletReport;
 
@@ -41,8 +42,9 @@ bool WacomCTL672PacketParser(BYTE *packet, DWORD size, TabletReport *report) {
         return false;
 
     *report = (TabletReport){
-        .point.x = *(USHORT*)(packet + 2) / (float)0x5460,
-        .point.y = *(USHORT*)(packet + 4) / (float)0x34BC,
+        .point.x  = *(USHORT*)(packet + 2) / (float)0x5460,
+        .point.y  = *(USHORT*)(packet + 4) / (float)0x34BC,
+        .pressure = *(USHORT*)(packet + 6) / 2047.0f,
         .flags = 
             (packet[1] & 0x01) ? (TABLET_REPORT_POINTER_DOWN) : (0) |
             (packet[1] & 0x02) ? (TABLET_REPORT_BUTTON_DOWN(0)) : (0) |

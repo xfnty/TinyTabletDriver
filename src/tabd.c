@@ -3,7 +3,8 @@
 #include "tablet.h"
 #include "resources.h"
 
-#define TRAY_WNDCLASSNAME       L"tabd"
+#define MAIN_WNDCLASSNAME       L"tabd"
+#define TRAY_WNDCLASSNAME       L"tabd-tray"
 #define TRAY_WM_ICON_MESSAGE    (WM_USER+1)
 #define TRAY_WM_SHOW_MENU       (WM_USER+2)
 #define TRAY_WM_ACTIVATE_PRESET (WM_USER+3)
@@ -14,6 +15,17 @@ static void InitThreadMessageQueue(void);
 static void _Log(DWORD tid, PCWSTR file, int line, PCSTR func, PCWSTR message, ...);
 #define Log(_message, ...) \
     _Log(GetCurrentThreadId(), __WFILE__, __LINE__, __func__, _message, ##__VA_ARGS__);
+
+static void WinEventHookCallback(
+    HWINEVENTHOOK hWinEventHook,
+    DWORD event,
+    HWND hwnd,
+    LONG idObject,
+    LONG idChild,
+    DWORD idEventThread,
+    DWORD dwmsEventTime
+);
+static LRESULT MainWindowEventHandler(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
 
 /* A whole separate thread with a hidden window and its message queue are dedicated for tray menu 
 only because TrackPopupMenu() blocks the calling thread and sometimes fails if called from a thread 
@@ -39,6 +51,8 @@ static void SynthesizeInput(const TabletReport *report);
 static DWORD s_main_thread_id;
 static HINSTANCE s_hinstance;
 static HANDLE s_hconsole;
+static POINT s_screen_size;
+static HWINEVENTHOOK s_win_event_hook;
 
 static CRITICAL_SECTION s_tray_lock;
 static HANDLE s_tray_thread;
@@ -53,6 +67,8 @@ static TabletInfo s_tablet_info;
 static BYTE s_tablet_packet[1024];
 static int s_tablet_preset_idx;
 static TabletReport s_tablet_previous_report;
+static HSYNTHETICPOINTERDEVICE s_ink_device;
+static HWND s_ink_foreground_window;
 
 void _start(void) {
     s_main_thread_id = GetCurrentThreadId();
@@ -60,8 +76,34 @@ void _start(void) {
     if (AttachConsole(ATTACH_PARENT_PROCESS)) {
         s_hconsole = GetStdHandle(STD_OUTPUT_HANDLE);
     }
+    s_screen_size = (POINT){ GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN) };
+    s_ink_foreground_window = GetForegroundWindow();
+
+    s_ink_device = CreateSyntheticPointerDevice(PT_PEN, 1, POINTER_FEEDBACK_DEFAULT);
+    ASSERT(s_ink_device);
 
     InitThreadMessageQueue();
+
+    WNDCLASSEXW wndclass = {
+        .cbSize = sizeof(wndclass),
+        .hInstance = s_hinstance,
+        .lpszClassName = MAIN_WNDCLASSNAME,
+        .lpfnWndProc = MainWindowEventHandler,
+    };
+    ASSERT(RegisterClassExW(&wndclass));
+    HWND hwnd = CreateWindowExW(0, MAIN_WNDCLASSNAME, 0, 0, 0, 0, 0, 0, 0, 0, s_hinstance, 0);
+    ASSERT(hwnd);
+
+    s_win_event_hook = SetWinEventHook(
+        EVENT_SYSTEM_FOREGROUND,
+        EVENT_SYSTEM_FOREGROUND,
+        0,
+        WinEventHookCallback,
+        0,
+        0,
+        WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS
+    );
+    ASSERT(s_win_event_hook);
 
     InitializeCriticalSection(&s_tray_lock);
     HANDLE thread_ready = CreateEventW(0, false, false, 0);
@@ -98,7 +140,7 @@ void _start(void) {
     };
     ASSERT(!CM_Register_Notification(&filter, 0, DeviceChangedCallback, &s_device_notification));
 
-    while (true) {
+    for (bool is_running = true; is_running; ) {
         DWORD wait = MsgWaitForMultipleObjects(
             1, &s_tablet_overlapped.hEvent, false, INFINITE, QS_ALLINPUT
         );
@@ -123,10 +165,15 @@ void _start(void) {
             }
             LeaveCriticalSection(&s_tablet_lock);
         } else if (wait == WAIT_OBJECT_0 + 1) {
-            MSG msg;
-            if (PeekMessageW(&msg, (HWND)-1, 0, 0, PM_REMOVE)) {
+            for (MSG msg; PeekMessageW(&msg, 0, 0, 0, PM_REMOVE); ) {
+                if (msg.hwnd) {
+                    TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                    continue;
+                }
+
                 if (msg.message == WM_QUIT) {
-                    break;
+                    is_running = false;
                 } else if (msg.message == TRAY_WM_ACTIVATE_PRESET) {
                     EnterCriticalSection(&s_tablet_lock);
                     s_tablet_preset_idx = msg.lParam;
@@ -150,7 +197,17 @@ void _start(void) {
     WaitForSingleObject(s_tray_thread, INFINITE);
     DeleteCriticalSection(&s_tray_lock);
 
+    UnhookWinEvent(s_win_event_hook);
+    DestroySyntheticPointerDevice(s_ink_device);
+
     ExitProcess(0);
+}
+
+LRESULT MainWindowEventHandler(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == WM_QUIT) {
+        PostThreadMessageW(s_main_thread_id, WM_QUIT, 0, 0);
+    }
+    return DefWindowProcW(hwnd, msg, wp, lp);
 }
 
 DWORD WINAPI TrayThreadProc(HANDLE thread_ready) {
@@ -309,30 +366,52 @@ void SynthesizeInput(const TabletReport *report) {
         report->point
     );
 
-    INPUT input = {
-        .type = INPUT_MOUSE,
-        .mi = (MOUSEINPUT){
-            .dx = point.x * 65535,
-            .dy = point.y * 65535,
-            .dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE,
-        },
-    };
+    if (g_presets[s_tablet_preset_idx].mode == MODE_MOUSE) {
+        INPUT input = {
+            .type = INPUT_MOUSE,
+            .mi = (MOUSEINPUT){
+                .dx = point.x * 65535,
+                .dy = point.y * 65535,
+                .dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE,
+            },
+        };
 
-    // FIXME
-    bool pointer_down = report->flags & TABLET_REPORT_POINTER_DOWN;
-    bool was_pointer_down = s_tablet_previous_report.flags & TABLET_REPORT_POINTER_DOWN;
-    if      (pointer_down && !was_pointer_down) input.mi.dwFlags |= MOUSEEVENTF_LEFTDOWN;
-    else if (!pointer_down && was_pointer_down) input.mi.dwFlags |= MOUSEEVENTF_LEFTUP;
+        // FIXME
+        bool pointer_down = report->flags & TABLET_REPORT_POINTER_DOWN;
+        bool was_pointer_down = s_tablet_previous_report.flags & TABLET_REPORT_POINTER_DOWN;
+        bool b1_down = report->flags & TABLET_REPORT_BUTTON_DOWN(0);
+        bool was_b1_down = s_tablet_previous_report.flags & TABLET_REPORT_BUTTON_DOWN(0);
+        if      (pointer_down && !was_pointer_down) input.mi.dwFlags |= MOUSEEVENTF_LEFTDOWN;
+        else if (!pointer_down && was_pointer_down) input.mi.dwFlags |= MOUSEEVENTF_LEFTUP;
+        if      (b1_down && !was_b1_down) input.mi.dwFlags |= MOUSEEVENTF_RIGHTDOWN;
+        else if (!b1_down && was_b1_down) input.mi.dwFlags |= MOUSEEVENTF_RIGHTUP;
 
-    bool b1_down = report->flags & TABLET_REPORT_BUTTON_DOWN(0);
-    bool was_b1_down = s_tablet_previous_report.flags & TABLET_REPORT_BUTTON_DOWN(0);
-    if      (b1_down && !was_b1_down) input.mi.dwFlags |= MOUSEEVENTF_RIGHTDOWN;
-    else if (!b1_down && was_b1_down) input.mi.dwFlags |= MOUSEEVENTF_RIGHTUP;
+        SendInput(1, &input, sizeof(input));
+    } else if (g_presets[s_tablet_preset_idx].mode == MODE_INK) {
+        POINT pixel_location = { point.x * s_screen_size.x, point.y * s_screen_size.y };
+        POINTER_TYPE_INFO input = {
+            .type = PT_PEN,
+            .penInfo = {
+                .pointerInfo = {
+                    .pointerType = PT_PEN,
+                    .hwndTarget = s_ink_foreground_window,
+                    .pointerFlags = POINTER_FLAG_INRANGE | (
+                        (report->pressure)
+                            ? (POINTER_FLAG_INCONTACT | POINTER_FLAG_DOWN)
+                            : (POINTER_FLAG_UP)
+                    ),
+                    .ptPixelLocation = pixel_location,
+                    .ptPixelLocationRaw = pixel_location,
+                },
+                .penMask = PEN_MASK_PRESSURE,
+                .pressure = report->pressure * 1024,
+            }
+        };
+        InjectSyntheticPointerInput(s_ink_device, &input, 1);
+    }
 
     s_tablet_previous_report = *report;
     LeaveCriticalSection(&s_tablet_lock);
-
-    SendInput(1, &input, sizeof(input));
 }
 
 void InitThreadMessageQueue(void) {
@@ -365,4 +444,21 @@ void _Log(DWORD tid, PCWSTR file, int line, PCSTR func, PCWSTR message, ...) {
     length += swprintf_s(buffer + length, sizeof(buffer) - length, L"\n");
 
     WriteConsoleW(s_hconsole, buffer, length, 0, 0);
+}
+
+void WinEventHookCallback(
+    HWINEVENTHOOK hWinEventHook,
+    DWORD event,
+    HWND hwnd,
+    LONG idObject,
+    LONG idChild,
+    DWORD idEventThread,
+    DWORD dwmsEventTime
+) {
+    if (event != EVENT_SYSTEM_FOREGROUND)
+        return;
+
+    EnterCriticalSection(&s_tablet_lock);
+    s_ink_foreground_window = hwnd;
+    LeaveCriticalSection(&s_tablet_lock);
 }

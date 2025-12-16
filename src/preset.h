@@ -10,14 +10,20 @@ typedef struct {
     float rotation;
 } ActiveArea; 
 
+typedef enum {
+    MODE_MOUSE,
+    MODE_INK,
+} OutputMode;
+
 typedef struct {
     PCWSTR name;
     ActiveArea area;
+    OutputMode mode;
 } Preset;
 
 const Preset g_presets[] = {
-    { L"Osu",     { {80.41049, 85}, {100, 56.222546}, -90 } },
-    { L"Drawing", { {108, 67.5},    {216, 135},         0 } },
+    { L"Drawing", { {108, 67.5},    {216, 135},         0 }, MODE_INK   },
+    { L"Osu",     { {80.41049, 85.5}, {99, 55.66032}, -90 }, MODE_MOUSE },
 };
 
 /* Illustrations are available in docs/preset-transforms.excalidraw */
