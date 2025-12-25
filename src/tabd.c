@@ -405,14 +405,17 @@ void SynthesizeInput(const TabletReport *report) {
     if      (pointer_down && !was_pointer_down) mouse.mi.dwFlags |= MOUSEEVENTF_LEFTDOWN;
     else if (!pointer_down && was_pointer_down) mouse.mi.dwFlags |= MOUSEEVENTF_LEFTUP;
 
-    mouse.mi.dwFlags |= MOUSEEVENTF_MOVE;
-
     if      (b1_down && !was_b1_down) mouse.mi.dwFlags |= MOUSEEVENTF_RIGHTDOWN;
     else if (!b1_down && was_b1_down) mouse.mi.dwFlags |= MOUSEEVENTF_RIGHTUP;
 
     if (preset->mode == MODE_INK || b2_down) {
         InjectSyntheticPointerInput(s_ink_device, &pen, 1);
+
+        if (b1_down != was_b1_down) {
+            SendInput(1, &mouse, sizeof(mouse));
+        }
     } else {
+        mouse.mi.dwFlags |= MOUSEEVENTF_MOVE;
         SendInput(1, &mouse, sizeof(mouse));
     }
 

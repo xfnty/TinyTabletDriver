@@ -23,7 +23,7 @@ typedef struct {
 } Preset;
 
 const Preset g_presets[] = {
-    { L"Drawing", { {108, 67.5},      {216, 135},       0 }, MODE_INK,   1.25 },
+    { L"Drawing", { {108, 67.5},      {216, 135},       0 }, MODE_INK,   1.15 },
     { L"Osu",     { {80.41049, 85.5}, {99, 55.66032}, -90 }, MODE_MOUSE, 0    },
 };
 
